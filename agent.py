@@ -4,8 +4,7 @@ import json
 import os
 from dotenv import load_dotenv
 from supabase import create_client, Client
-from livekit.agents import JobContext, llm
-from livekit.agents.pipeline import VoicePipelineAgent
+from livekit.agents import JobContext, llm, VoicePipelineAgent
 from livekit.plugins import openai, silero, deepgram
 
 logging.basicConfig(level=logging.INFO)
@@ -43,7 +42,7 @@ async def entrypoint(ctx: JobContext):
     except Exception as history_err:
         logger.error(f"Error restoring past conversation history: {history_err}")
 
-    # Set up the system prompt inside the chat memory context
+    # Set up the system prompt inside the chat memory context array
     chat_memory.messages.insert(0, llm.ChatMessage(
         role="system",
         content=(
