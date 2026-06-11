@@ -4,7 +4,8 @@ import json
 import os
 from dotenv import load_dotenv
 from supabase import create_client, Client
-from livekit.agents import JobContext, llm, VoicePipelineAgent
+from livekit.agents import JobContext, llm
+from livekit.agents.pipeline import VoicePipelineAgent
 from livekit.plugins import openai, silero, deepgram
 
 logging.basicConfig(level=logging.INFO)
