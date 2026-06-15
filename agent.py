@@ -1,121 +1,276 @@
-import asyncio
 import logging
-import json
 import os
-from dotenv import load_dotenv
-from supabase import create_client, Client
-from livekit.agents import JobContext, llm
-from livekit.agents.pipeline import VoicePipelineAgent
-from livekit.plugins import openai, silero, deepgram
+from typing import Any
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("Real-Estate-AI-Agent")
+from dotenv import load_dotenv
+from livekit.agents import (
+    Agent,
+    AgentServer,
+    AgentSession,
+    ChatContext,
+    ConversationItemAddedEvent,
+    JobContext,
+    cli,
+)
+from livekit.plugins import deepgram, openai, silero
+from supabase import Client, create_client
+
+
 load_dotenv()
 
-# Instantiate secure connection to Supabase DB Cloud
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+logging.basicConfig(level=logging.INFO)
 
-async def entrypoint(ctx: JobContext):
-    logger.info(f"Connecting Agent Backend to Audio Stream Room: {ctx.room.name}")
-    
-    # 🧠 Initialize modern Chat Context
-    chat_memory = llm.ChatContext()
-    session_transcript_accumulator = []
+# Hide noisy HTTP logs
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("hpack").setLevel(logging.WARNING)
 
-    # CHATGPT HISTORY LAYER: Fetch past conversation from Supabase if it exists
-    room_id = ctx.room.name
-    try:
-        past_session = supabase.table("chat_sessions").select("transcript_log").eq("channel_room", room_id).execute()
-        if past_session.data:
-            logger.info(f"Found existing history for room {room_id}. Loading into memory...")
-            raw_log = past_session.data[0]["transcript_log"]
-            
-            # Parse the text transcript back into individual memory messages for the AI
-            for line in raw_log.split("\n"):
-                if line.startswith("User: ") or line.startswith("User (Typed): "):
-                    text = line.replace("User: ", "").replace("User (Typed): ", "")
-                    chat_memory.messages.append(llm.ChatMessage(role="user", content=text))
-                elif line.startswith("Agent: "):
-                    text = line.replace("Agent: ", "")
-                    chat_memory.messages.append(llm.ChatMessage(role="assistant", content=text))
-    except Exception as history_err:
-        logger.error(f"Error restoring past conversation history: {history_err}")
+logger = logging.getLogger("real-estate-ai-agent")
 
-    # Set up the system prompt inside the chat memory context array
-    chat_memory.messages.insert(0, llm.ChatMessage(
-        role="system",
-        content=(
-            "You are an expert real estate AI assistant named 'Real Estate A.I Agent', specializing in Islamabad, Pakistan. "
-            "Be professional, polite, and helpful. Guide users about sectors like D-12, E-7, G-11, and I-8. "
-            "You have access to the conversation history. If the user asks about something discussed previously, refer back to it naturally."
-        )
-    ))
 
-    # Build the Voice Agent with pre-loaded memory context
-    real_estate_agent = VoicePipelineAgent(
-        vad=silero.VAD.load(),
-        stt=deepgram.STT(),  
-        llm=openai.LLM.with_deepseek(model="deepseek-chat", temperature=0.7),
-        tts=deepgram.TTS(),
-        chat_ctx=chat_memory
+SYSTEM_PROMPT = """
+You are a helpful real estate AI assistant for buyers, renters, sellers, and agents.
+
+Your style:
+- Be conversational, concise, and practical.
+- Ask one or two focused follow-up questions when the user has not provided enough detail.
+- Remember facts from the current room history, such as budget, city, preferred areas,
+  bedrooms, property type, financing needs, timeline, and previous recommendations.
+- Never invent live listings, prices, legal advice, mortgage approvals, or guarantees.
+- If the user asks for market, legal, tax, or financing decisions, explain that they
+  should verify with a licensed local professional before acting.
+- For real estate searches, collect location, budget, buy/rent, bedrooms, property type,
+  must-have features, and timeline.
+""".strip()
+
+
+REQUIRED_ENV_VARS = (
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "DEEPGRAM_API_KEY",
+    "DEEPSEEK_API_KEY",
+)
+
+supabase: Client | None = None
+server = AgentServer()
+
+
+def require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
+def init_supabase() -> Client:
+    return create_client(
+        require_env("SUPABASE_URL"),
+        require_env("SUPABASE_SERVICE_ROLE_KEY"),
     )
 
-    await ctx.connect()
-    real_estate_agent.start(ctx.room)
 
-    # Accumulate live transcripts as the call progresses
-    @real_estate_agent.on("user_speech_transcribed")
-    def on_user_speech(agent, text: str):
-        if text.strip():
-            session_transcript_accumulator.append(f"User: {text}")
+def validate_environment() -> None:
+    for name in REQUIRED_ENV_VARS:
+        require_env(name)
 
-    @real_estate_agent.on("agent_speech_committed")
-    def on_agent_speech(agent, msg: llm.ChatMessage):
-        if msg.content and msg.content.strip():
-            session_transcript_accumulator.append(f"Agent: {msg.content}")
 
-    @ctx.room.on("data_received")
-    def on_data_received(data: bytes, participant, kind):
-        try:
-            payload = json.loads(data.decode('utf-8'))
-            if "message" in payload:
-                user_text = payload["message"]
-                session_transcript_accumulator.append(f"User (Typed): {user_text}")
-                asyncio.create_task(real_estate_agent.say(user_text, allow_interruptions=True))
-        except Exception as e:
-            logger.error(f"Error handling text data packet: {e}")
+def get_supabase() -> Client:
+    global supabase
+    if supabase is None:
+        supabase = init_supabase()
+    return supabase
 
-    # Only say the warm greeting if it's a completely brand new chat
-    if len(chat_memory.messages) <= 1:  # Only system prompt is inside
-        await real_estate_agent.say(
-            "Assalam-o-Alaikum! Welcome, I am your Real Estate A.I Agent. How can I help you navigate properties in Islamabad today?",
-            allow_interruptions=True
+
+def message_text(item: Any) -> str:
+    content = getattr(item, "content", "")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        return " ".join(str(part) for part in content if part).strip()
+    return str(content).strip()
+
+
+def save_to_db(room_id: str, role: str, text: str) -> None:
+    text = text.strip()
+
+    if not text:
+        return
+
+    try:
+        client = get_supabase()
+        result = (
+            client.table("chat_sessions")
+            .select("transcript_log")
+            .eq("channel_room", room_id)
+            .execute()
         )
 
-    # Keep working loop active until user session severs
-    while ctx.room.connection_state == "connected" or ctx.room.connection_state == "connecting":
-        await asyncio.sleep(1)
+        new_line = f"{role}: {text}"
+        if result.data:
+            current_log = result.data[0].get("transcript_log") or ""
+            transcript_log = f"{current_log}\n{new_line}" if current_log else new_line
+            (
+                client.table("chat_sessions")
+                .update({"transcript_log": transcript_log})
+                .eq("channel_room", room_id)
+                .execute()
+            )
+        else:
+            (
+                client.table("chat_sessions")
+                .insert({"channel_room": room_id, "transcript_log": new_line})
+                .execute()
+            )
 
-    # User disconnected -> Upsert the final combined transcript text back to Supabase
+        logger.info("Saved %s message for room %s", role, room_id)
+    except Exception:
+        logger.exception("Could not save message to Supabase")
+
+
+def load_memory(room_id: str) -> str:
     try:
-        existing_record = supabase.table("chat_sessions").select("transcript_log").eq("channel_room", room_id).execute()
-        
-        new_log = "\n".join(session_transcript_accumulator)
-        if existing_record.data and new_log:
-            full_transcript = existing_record.data[0]["transcript_log"] + "\n" + new_log
-            supabase.table("chat_sessions").update({"transcript_log": full_transcript}).eq("channel_room", room_id).execute()
-        elif new_log:
-            supabase.table("chat_sessions").insert({
-                "user_identity": "WebUser",
-                "channel_room": room_id,
-                "transcript_log": new_log
-            }).execute()
-        logger.info("Successfully synced conversation updates to Supabase.")
-    except Exception as db_err:
-        logger.error(f"Failed writing execution tracking frames to database stack: {db_err}")
+        result = (
+            get_supabase()
+            .table("chat_sessions")
+            .select("transcript_log")
+            .eq("channel_room", room_id)
+            .execute()
+        )
+        if not result.data:
+            return ""
+        return (result.data[0].get("transcript_log") or "").strip()
+    except Exception:
+        logger.exception("Could not load room memory from Supabase")
+        return ""
+    
+def load_property_data() -> str:
+    try:
+        insights = (
+            get_supabase()
+            .table("property_insights")
+            .select("*")
+            .execute()
+        )
+
+        prices = (
+            get_supabase()
+            .table("property_prices")
+            .select("*")
+            .execute()
+        )
+
+        text = "\n\nPROPERTY INSIGHTS:\n"
+
+        for row in insights.data:
+            text += (
+                f"Sector: {row['sector_name']}, "
+                f"Category: {row['tier_category']}, "
+                f"Average Price Range: {row['average_price_range']}\n"
+            )
+
+        text += "\nPROPERTY PRICES:\n"
+
+        for row in prices.data:
+            text += (
+                f"Sector: {row['sector_name']}, "
+                f"Type: {row['property_type']}, "
+                f"Size: {row['property_size']}, "
+                f"Price Range: {row['price_range']}\n"
+            )
+
+        return text
+
+    except Exception:
+        logger.exception("Could not load property data")
+        return ""
+
+
+def build_chat_context(room_id: str) -> ChatContext:
+    chat_ctx = ChatContext.empty()
+
+    memory = load_memory(room_id)
+    property_data = load_property_data()
+
+    if memory:
+        chat_ctx.add_message(
+            role="system",
+            content=(
+                "Previous conversation memory for this LiveKit room follows. "
+                "Use it when it is relevant, but do not mention it unless the user asks.\n\n"
+                f"{memory}"
+            ),
+        )
+
+    if property_data:
+        chat_ctx.add_message(
+            role="system",
+            content=(
+                "The following property database contains verified Islamabad "
+                "real-estate information. Always prefer these values over your "
+                "own assumptions when answering questions.\n\n"
+                f"{property_data}"
+            ),
+        )
+
+    return chat_ctx
+
+
+def build_agent(room_id: str) -> Agent:
+    return Agent(
+        instructions=SYSTEM_PROMPT,
+        chat_ctx=build_chat_context(room_id),
+    )
+
+
+@server.rtc_session()
+async def entrypoint(ctx: JobContext) -> None:
+    validate_environment()
+
+    room_id = ctx.room.name
+
+    print("\n" + "=" * 50)
+    print(f"ROOM ID: {room_id}")
+    print("=" * 50 + "\n")
+
+    logger.info("Starting real estate agent for room %s", room_id)
+
+    session = AgentSession(
+        vad=silero.VAD.load(),
+        stt=deepgram.STT(model=os.getenv("DEEPGRAM_STT_MODEL", "nova-3")),
+        llm=openai.LLM.with_deepseek(
+            model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+        ),
+        tts=deepgram.TTS(model=os.getenv("DEEPGRAM_TTS_MODEL", "aura-2-andromeda-en")),
+    )
+
+    @session.on("conversation_item_added")
+    def on_conversation_item(event: ConversationItemAddedEvent) -> None:    
+        try:
+            item = event.item
+            role = getattr(item, "role", None)
+            text = message_text(item)
+
+            if role == "user":
+                save_to_db(room_id, "User", text)
+
+            elif role == "assistant":
+                save_to_db(room_id, "Agent", text)
+
+        except Exception:
+         logger.exception("Conversation handler failed")
+
+    await session.start(
+        agent=build_agent(room_id),
+        room=ctx.room,
+        record=False,
+    )
+
+    session.say(
+        "Assalam-o-Alaikum! I am your real estate AI assistant. "
+        "Tell me what kind of property you are looking for.",
+        allow_interruptions=True,
+    )
+
 
 if __name__ == "__main__":
-    from livekit.agents import cli
-    cli.run_app(entrypoint)
+    cli.run_app(server)
