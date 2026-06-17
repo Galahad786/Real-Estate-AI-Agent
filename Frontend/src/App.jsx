@@ -20,6 +20,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const messagesEndRef = useRef(null);
+  const [conversations, setConversations] = useState([]);
 
   async function startConversation() {
     try {
@@ -59,12 +60,30 @@ export default function App() {
     }
   }
 
+  async function loadConversations() {
+  try {
+    const response = await fetch(
+      `${API_URL}/api/conversations`
+    );
+
+    const data = await response.json();
+
+    setConversations(data);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
   useEffect(() => {
     if (!roomName) return;
     loadHistory();
     const interval = setInterval(loadHistory, 2000);
     return () => clearInterval(interval);
   }, [roomName]);
+
+  useEffect(() => {
+  loadConversations();
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -144,18 +163,16 @@ export default function App() {
               <div className="history-section">
                 <div className="history-label">Recents</div>
                 <div className="history-list">
-                  {[
-                    "DHA Phase 2 Investment",
-                    "E-7 Luxury Residential",
-                    "Bahria Enclave Trends",
-                    "G-11 Commercial Hub",
-                    "F-6 Rental Analysis",
-                  ].map((item, i) => (
-                    <div key={i} className="history-item">
-                      <span className="history-icon">▪</span>
-                      {item}
-                    </div>
-                  ))}
+                 {conversations.map((conv) => (
+  <div
+    key={conv.room_name}
+    className="history-item"
+    onClick={() => setRoomName(conv.room_name)}
+  >
+    <span className="history-icon">💬</span>
+    {conv.title}
+  </div>
+))}
                 </div>
               </div>
 
