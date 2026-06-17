@@ -168,6 +168,7 @@ export default function App() {
     key={conv.room_name}
     className="history-item"
     onClick={() => setRoomName(conv.room_name)}
+    
   >
     <span className="history-icon">💬</span>
     {conv.title}

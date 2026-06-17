@@ -89,6 +89,33 @@ def message_text(item: Any) -> str:
         return " ".join(str(part) for part in content if part).strip()
     return str(content).strip()
 
+def generate_chat_title(text: str) -> str:
+    try:
+        llm = openai.LLM.with_deepseek(
+            model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+        )
+
+        response = llm.complete(
+            f"""
+Generate a short conversation title for a real estate chat.
+
+User message:
+{text}
+
+Rules:
+- Maximum 5 words
+- Professional
+- No quotation marks
+- No emojis
+- Return title only
+"""
+        )
+
+        return response.text.strip()
+
+    except Exception:
+        return text[:50]
+
 
 def save_to_db(room_id: str, role: str, text: str) -> None:
     text = text.strip()
@@ -116,17 +143,17 @@ def save_to_db(room_id: str, role: str, text: str) -> None:
                 .execute()
             )
         else:
-            title = text[:60]
+            title = generate_chat_title(text)
 
             (
-                client.table("chat_sessions")
+                 client.table("chat_sessions")
                 .insert(
                     {
                         "channel_room": room_id,
                         "transcript_log": new_line,
                         "title": title,
                     }
-                )
+            )
         .execute()
         )
 
