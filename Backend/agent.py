@@ -116,11 +116,19 @@ def save_to_db(room_id: str, role: str, text: str) -> None:
                 .execute()
             )
         else:
+            title = text[:60]
+
             (
                 client.table("chat_sessions")
-                .insert({"channel_room": room_id, "transcript_log": new_line})
-                .execute()
-            )
+                .insert(
+                    {
+                        "channel_room": room_id,
+                        "transcript_log": new_line,
+                        "title": title,
+                    }
+                )
+        .execute()
+        )
 
         logger.info("Saved %s message for room %s", role, room_id)
     except Exception:

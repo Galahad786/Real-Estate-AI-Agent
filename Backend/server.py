@@ -142,7 +142,8 @@ def get_conversations():
     result = (
         supabase_client()
         .table("chat_sessions")
-        .select("channel_room, transcript_log")
+        .select("channel_room, title, created_at")
+        .order("created_at", desc=True)
         .execute()
     )
 
