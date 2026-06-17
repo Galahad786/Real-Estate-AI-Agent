@@ -136,3 +136,33 @@ def get_history(room_name: str) -> list[Message]:
         return []
 
     return parse_transcript(result.data[0].get("transcript_log") or "")
+
+@app.get("/api/conversations")
+def get_conversations():
+    result = (
+        supabase_client()
+        .table("chat_sessions")
+        .select("channel_room, transcript_log")
+        .execute()
+    )
+
+    conversations = []
+
+    for row in result.data:
+        room = row.get("channel_room")
+
+        transcript = row.get("transcript_log") or ""
+
+        title = room
+
+        for line in transcript.splitlines():
+            if line.startswith("User:"):
+                title = line.replace("User:", "").strip()[:40]
+                break
+
+        conversations.append({
+            "room_name": room,
+            "title": title,
+        })
+
+    return conversations
