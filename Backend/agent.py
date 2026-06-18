@@ -125,41 +125,77 @@ def save_to_db(room_id: str, role: str, text: str) -> None:
 
     try:
         client = get_supabase()
+
         result = (
             client.table("chat_sessions")
-            .select("transcript_log")
+            .select("transcript_log, title")
             .eq("channel_room", room_id)
             .execute()
         )
 
         new_line = f"{role}: {text}"
+
         if result.data:
             current_log = result.data[0].get("transcript_log") or ""
-            transcript_log = f"{current_log}\n{new_line}" if current_log else new_line
+            current_title = result.data[0].get("title") or ""
+
+            if (
+                role.lower() == "user"
+                and (
+                    not current_title
+                    or current_title == room_id
+                    or current_title.startswith("Assalam-o-Alaikum")
+                )
+            ):
+                (
+                    client.table("chat_sessions")
+                    .update({"title": text[:60]})
+                    .eq("channel_room", room_id)
+                    .execute()
+                )
+
+            transcript_log = (
+                f"{current_log}\n{new_line}"
+                if current_log
+                else new_line
+            )
+
             (
                 client.table("chat_sessions")
                 .update({"transcript_log": transcript_log})
                 .eq("channel_room", room_id)
                 .execute()
             )
+
         else:
-            title = generate_chat_title(text)
+            title = room_id
+
+            if role.lower() == "user":
+                title = text[:60]
 
             (
-                 client.table("chat_sessions")
+                client.table("chat_sessions")
                 .insert(
                     {
                         "channel_room": room_id,
                         "transcript_log": new_line,
                         "title": title,
                     }
+                )
+                .execute()
             )
-        .execute()
+
+        logger.info(
+            "Saved %s message for room %s",
+            role,
+            room_id,
         )
 
-        logger.info("Saved %s message for room %s", role, room_id)
     except Exception:
-        logger.exception("Could not save message to Supabase")
+        logger.exception(
+            "Could not save message to Supabase"
+        )
+
 
 
 def load_memory(room_id: str) -> str:
