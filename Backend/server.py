@@ -152,18 +152,11 @@ def get_conversations():
     for row in result.data:
         room = row.get("channel_room")
 
-        transcript = row.get("transcript_log") or ""
-
-        title = room
-
-        for line in transcript.splitlines():
-            if line.startswith("User:"):
-                title = line.replace("User:", "").strip()[:40]
-                break
+        title = row.get("title") or room
 
         conversations.append({
             "room_name": room,
             "title": title,
-        })
+    })
 
     return conversations
