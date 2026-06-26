@@ -76,6 +76,23 @@ const API_URL =
   (import.meta.env.DEV ? "" : "https://athletic-learning-production.up.railway.app");
 const LIVEKIT_URL = "wss://test-1-euow2v8o.livekit.cloud";
 
+async function readErrorMessage(response) {
+  const fallback = `Unable to create LiveKit token (${response.status})`;
+
+  try {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const data = await response.json();
+      return data.detail || data.message || fallback;
+    }
+
+    const text = await response.text();
+    return text ? `${fallback}: ${text.slice(0, 160)}` : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export default function App() {
   const [token, setToken] = useState(null);
   const [roomName, setRoomName] = useState("");
@@ -115,7 +132,7 @@ export default function App() {
     });
 
     if (!response.ok) {
-      throw new Error("Unable to create LiveKit token");
+      throw new Error(await readErrorMessage(response));
     }
 
     const data = await response.json();
