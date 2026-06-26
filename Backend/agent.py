@@ -96,7 +96,7 @@ def get_supabase() -> Client:
 def message_text(item: Any) -> str:
     content = getattr(item, "content", "")
     if isinstance(content, str):
-        return content.strip()
+        return content.striip()
     if isinstance(content, list):
         return " ".join(str(part) for part in content if part).strip()
     return str(content).strip()
