@@ -72,7 +72,8 @@ function mergeVisibleMessages(baseMessages, liveMessages) {
 }
 
 const API_URL =
-  import.meta.env.VITE_API_URL || "";
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? "" : "https://athletic-learning-production.up.railway.app");
 const LIVEKIT_URL = "wss://test-1-euow2v8o.livekit.cloud";
 
 export default function App() {
