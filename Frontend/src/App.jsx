@@ -1,316 +1,259 @@
-import { useState, useEffect, useRef } from "react";
-import {
-  LiveKitRoom,
-  RoomAudioRenderer,
-} from "@livekit/components-react";
+import { useMemo, useState } from "react";
+import { LiveKitRoom, RoomAudioRenderer } from "@livekit/components-react";
 
 import "@livekit/components-styles";
 
+import ChatWindow from "./components/ChatWindow";
+import InputBar from "./components/InputBar";
+import LiveTranscriptionBridge from "./components/LiveTranscriptionBridge";
+import OrbOverlay from "./components/OrbOverlay";
+import Sidebar from "./components/Sidebar";
+import TopBar from "./components/TopBar";
+import { useConversation } from "./hooks/useConversation";
+import { useLiveKit } from "./hooks/useLiveKit";
 import "./App.css";
 
+function normalizeMessageText(value) {
+  return (value || "").trim().replace(/\s+/g, " ");
+}
+
+function cleanVisibleMessages(items) {
+  const cleaned = [];
+
+  for (const item of items) {
+    const text = normalizeMessageText(item.text || item.content);
+    if (!text) continue;
+
+    const previous = cleaned.at(-1);
+    if (previous) {
+      const previousText = normalizeMessageText(previous.text || previous.content);
+      if (previous.role === item.role && previousText === text) continue;
+
+      if (previous.role !== item.role && previousText === text && text.length > 30) {
+        if (item.role === "assistant") {
+          cleaned[cleaned.length - 1] = item;
+        }
+        continue;
+      }
+    }
+
+    cleaned.push(item);
+  }
+
+  return cleaned;
+}
+
+function sameVisibleMessage(first, second) {
+  return (
+    first.role === second.role &&
+    normalizeMessageText(first.text || first.content) ===
+      normalizeMessageText(second.text || second.content)
+  );
+}
+
+function mergeVisibleMessages(baseMessages, liveMessages) {
+  const liveKeys = new Set(
+    liveMessages.map(
+      (message) =>
+        `${message.role}:${normalizeMessageText(message.text || message.content)}`,
+    ),
+  );
+  const baseWithoutLiveMatches = baseMessages.filter((message) => {
+    const key = `${message.role}:${normalizeMessageText(
+      message.text || message.content,
+    )}`;
+    return !liveKeys.has(key);
+  });
+
+  return cleanVisibleMessages([...baseWithoutLiveMatches, ...liveMessages]).filter(
+    (message, index, items) =>
+      items.findIndex((item) => sameVisibleMessage(item, message)) === index,
+  );
+}
+
 const API_URL =
-  "https://athletic-learning-production.up.railway.app";
+  import.meta.env.VITE_API_URL || "";
+const LIVEKIT_URL = "wss://test-1-euow2v8o.livekit.cloud";
 
 export default function App() {
   const [token, setToken] = useState(null);
   const [roomName, setRoomName] = useState("");
-  const [messages, setMessages] = useState([]);
-  const [voiceMode, setVoiceMode] = useState(true);
-  const [mode, setMode] = useState("voice");
-  const [input, setInput] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const messagesEndRef = useRef(null);
-  const [conversations, setConversations] = useState([]);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [voiceMinimized, setVoiceMinimized] = useState(false);
+  const [tokenRoomName, setTokenRoomName] = useState("");
+  const [isSendingText, setIsSendingText] = useState(false);
+  const [liveVoiceMessages, setLiveVoiceMessages] = useState([]);
+
+  const {
+    messages,
+    conversations,
+    activeConversation,
+    draftMessages,
+    loadConversations,
+    loadHistory,
+    sendTextMessage,
+  } = useConversation({
+    apiUrl: API_URL,
+    historyPaused: voiceOpen,
+    historyRefreshMs: 2000,
+    roomName,
+  });
+
+  async function connectToRoom(nextRoomName) {
+    const room = nextRoomName || `room-${Date.now()}`;
+    setRoomName(room);
+
+    const response = await fetch(`${API_URL}/api/livekit-token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        room_name: room,
+        identity: `user-${Date.now()}`,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Unable to create LiveKit token");
+    }
+
+    const data = await response.json();
+    setToken(data.token);
+    setTokenRoomName(room);
+    setVoiceOpen(false);
+    setVoiceMinimized(false);
+    await loadConversations();
+  }
 
   async function startConversation() {
     try {
-      const room = `room-${Date.now()}`;
-      setRoomName(room);
-
-      const response = await fetch(
-        `${API_URL}/api/livekit-token`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            room_name: room,
-            identity: `user-${Date.now()}`,
-          }),
-        }
-      );
-
-      const data = await response.json();
-      setToken(data.token);
+      await connectToRoom();
     } catch (err) {
       console.error(err);
       alert("Failed to connect");
     }
   }
 
-  async function loadHistory() {
-    if (!roomName) return;
-    try {
-      const response = await fetch(
-        `${API_URL}/api/history/${roomName}`
-      );
-      const data = await response.json();
-      setMessages(data);
-    } catch (err) {
-      console.error(err);
+  async function selectConversation(nextRoomName) {
+    setRoomName(nextRoomName);
+    setSidebarOpen(false);
+
+    if (!token) {
+      try {
+        await connectToRoom(nextRoomName);
+      } catch (err) {
+        console.error(err);
+        alert("Failed to load conversation");
+      }
     }
   }
 
-  async function loadConversations() {
-  try {
-    const response = await fetch(
-      `${API_URL}/api/conversations`
-    );
+  async function handleSendText(text) {
+    if (isSendingText) return;
 
-    const data = await response.json();
-
-    setConversations(data);
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-  useEffect(() => {
-    if (!roomName) return;
-    loadHistory();
-    const interval = setInterval(loadHistory, 2000);
-    return () => clearInterval(interval);
-  }, [roomName]);
-
-  useEffect(() => {
-  loadConversations();
-  }, []);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  function toggleVoice() {
-    setMode((prev) => {
-      if (prev === "chat") return "hybrid";
-      if (prev === "hybrid") return "chat";
-      if (prev === "voice") return "chat";
-      return "chat";
-    });
+    try {
+      setIsSendingText(true);
+      await sendTextMessage(text);
+    } finally {
+      setIsSendingText(false);
+    }
   }
 
-  function formatTime(ts) {
-    if (!ts) return "";
-    const d = new Date(ts);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const visibleMessages = useMemo(
+    () =>
+      voiceOpen
+        ? mergeVisibleMessages([...messages, ...draftMessages], liveVoiceMessages)
+        : cleanVisibleMessages([...messages, ...draftMessages]),
+    [draftMessages, liveVoiceMessages, messages, voiceOpen],
+  );
+  const { audioState } = useLiveKit({ voiceOpen, messages: visibleMessages });
+  const title = activeConversation?.title || "New Islamabad property conversation";
+
+  async function openVoiceMode() {
+    if (!token || tokenRoomName !== roomName) {
+      await connectToRoom(roomName);
+    }
+
+    setVoiceOpen(true);
+    setVoiceMinimized(false);
+    setLiveVoiceMessages([]);
   }
 
-  // Landing screen
+  function closeVoiceMode() {
+    setVoiceOpen(false);
+    setVoiceMinimized(false);
+    setLiveVoiceMessages([]);
+    void loadHistory();
+  }
+
   if (!token) {
     return (
-      <div className="app">
-        <div className="grid-bg" />
-        <div className="orb-container">
-          <div className="orb-glow-ring" />
-          <div className="orb">
-            <div className="orb-inner" />
-          </div>
-          <div className="brand-label">ISLAMABAD ESTATE AI</div>
-          <h1 className="landing-title">Your Intelligent<br />Property Assistant</h1>
-          <p className="landing-sub">Powered by real-time market intelligence</p>
-          <button className="connect-btn" onClick={startConversation}>
-            <span className="btn-icon">▶</span>
-            Initialize Session
+      <main className="launch-screen">
+        <section className="launch-content" aria-label="Start real estate assistant">
+          <div className="brand-mark">ESTATIQ</div>
+          <div className="launch-orb" aria-hidden="true" />
+          <h1>Islamabad real estate intelligence.</h1>
+          <p>Ask about Islamabad sectors, pricing, availability, and market context.</p>
+          <button className="launch-button" onClick={startConversation}>
+            Initialize session
           </button>
-          <div className="landing-status">
-            <span className="status-dot" />
-            SYSTEM READY
-          </div>
-        </div>
-      </div>
+        </section>
+      </main>
     );
   }
 
   return (
-    <LiveKitRoom
+      <LiveKitRoom
       token={token}
-      serverUrl="wss://test-1-euow2v8o.livekit.cloud"
-      connect={true}
+      serverUrl={LIVEKIT_URL}
+      connect={voiceOpen}
       audio={true}
       video={false}
     >
       <RoomAudioRenderer />
+      <LiveTranscriptionBridge
+        enabled={voiceOpen}
+        onMessages={setLiveVoiceMessages}
+      />
 
-      <div className="dashboard">
-        {/* Sidebar */}
-        <aside className={`sidebar${sidebarOpen ? "" : " collapsed"}`}>
-          <div className="sidebar-header">
-            <button className="menu-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>
-              <span className="menu-icon">
-                <span /><span /><span />
-              </span>
-            </button>
-            {sidebarOpen && (
-              <span className="sidebar-brand">ISLAMABAD ESTATE AI</span>
-            )}
-          </div>
+      <div className="app-shell">
+        <Sidebar
+          activeRoomName={roomName}
+          conversations={conversations}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          onNewChat={startConversation}
+          onSelectConversation={selectConversation}
+        />
 
-          {sidebarOpen && (
-            <>
-              <button className="new-chat-btn" onClick={startConversation}>
-                <span>＋</span> New Chat
-              </button>
-
-              <div className="history-section">
-                <div className="history-label">Recents</div>
-                <div className="history-list">
-                 {conversations.map((conv) => (
-  <div
-    key={conv.room_name}
-    className="history-item"
-    onClick={() => setRoomName(conv.room_name)}
-    
-  >
-    <span className="history-icon">💬</span>
-    {conv.title}
-  </div>
-))}
-                </div>
-              </div>
-
-              <div className="sidebar-footer">
-                <div className="sidebar-mode-btns">
-                  <button
-                    className={`mode-pill${mode === "voice" || mode === "hybrid" ? " active" : ""}`}
-                    onClick={() => setMode(mode === "voice" ? "chat" : "voice")}
-                  >
-                    🎙 Voice
-                  </button>
-                  <button
-                    className={`mode-pill${mode === "chat" ? " active" : ""}`}
-                    onClick={() => setMode("chat")}
-                  >
-                    💬 Chat
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
-        </aside>
-
-        {/* Main chat area */}
-        <main className="chat-area">
-          <div className="chat-topbar">
-            <div className="topbar-title">
-              {mode === "voice" ? "Voice Mode" : "Chat Mode"}
-            </div>
-            <div className="topbar-actions">
-              <button className="icon-btn" title="Notifications">🔔</button>
-              <button className="icon-btn" title="Profile">👤</button>
-            </div>
-          </div>
-
-          {/* Voice screen */}
-          {mode === "voice" ? (
-            <div className="voice-screen">
-              <div className="orb-glow-ring large" />
-              <div className="orb large">
-                <div className="orb-inner" />
-              </div>
-              <h2 className="voice-label">Listening...</h2>
-              <p className="voice-sub">Speak to query the property database</p>
-              <button className="switch-btn" onClick={() => setMode("chat")}>
-                Switch to Chat
-              </button>
-            </div>
-          ) : (
-            <>
-              {/* Transcript / messages */}
-              <div className="messages-area">
-                {messages.length === 0 && (
-                  <div className="empty-state">
-                    <div className="empty-orb">
-                      <div className="orb small">
-                        <div className="orb-inner" />
-                      </div>
-                    </div>
-                    <p>AI Unit initialized. Ask about properties, trends, or investment analysis.</p>
-                  </div>
-                )}
-
-                {messages.map((msg, index) => (
-                  <div
-                    key={index}
-                    className={`message-row ${msg.role === "user" ? "user-row" : "ai-row"}`}
-                  >
-                    {msg.role !== "user" && (
-                      <div className="avatar ai-avatar">AI</div>
-                    )}
-                    <div className={`bubble ${msg.role === "user" ? "user-bubble" : "ai-bubble"}`}>
-                      <div className="bubble-text">{msg.text}</div>
-                      {msg.timestamp && (
-                        <div className="bubble-meta">
-                          {msg.role === "user" ? "USER" : "AI UNIT 01"} // {formatTime(msg.timestamp)}
-                        </div>
-                      )}
-                    </div>
-                    {msg.role === "user" && (
-                      <div className="avatar user-avatar">U</div>
-                    )}
-                  </div>
-                ))}
-                <div ref={messagesEndRef} />
-              </div>
-
-              {/* Hybrid mini orb */}
-              {mode === "hybrid" && (
-                <div className="mini-orb-wrap">
-                  <div className="orb small">
-                    <div className="orb-inner" />
-                  </div>
-                  <span className="mini-orb-label">Voice Active</span>
-                </div>
-              )}
-
-              {/* Input bar */}
-              <div className="input-bar-wrapper">
-                <div className="input-bar">
-                  <button
-                    className={`voice-toggle${mode === "hybrid" ? " voice-active" : ""}`}
-                    onClick={toggleVoice}
-                    title={mode === "hybrid" ? "Disable voice" : "Enable voice"}
-                  >
-                    🎤
-                  </button>
-                  <input
-                    className="chat-input"
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && setInput("")}
-                    placeholder="Command AI... (e.g., 'Compare ROI in sectors 4 and 9')"
-                  />
-                  <button
-                    className="send-btn"
-                    onClick={() => setInput("")}
-                    title="Send"
-                  >
-                    ▶
-                  </button>
-                </div>
-                <div className="input-status-bar">
-                  <span className="status-item">
-                    <span className="status-dot green" /> SYSTEM: ONLINE
-                  </span>
-                  <span className="status-item">
-                    <span className="status-dot cyan" /> AGENT: LISTENING
-                  </span>
-                  <span className="status-item">
-                    <span className="status-dot yellow" /> ⚡ NEURAL PROCESSING
-                  </span>
-                </div>
-              </div>
-            </>
-          )}
+        <main className="chat-shell">
+          <TopBar
+            title={title}
+            sidebarOpen={sidebarOpen}
+            onToggleSidebar={() => setSidebarOpen((current) => !current)}
+          />
+          <ChatWindow
+            isStreaming={isSendingText}
+            messages={visibleMessages}
+            onSuggestionClick={handleSendText}
+          />
+          <InputBar
+            isRecording={voiceOpen}
+            isSending={isSendingText}
+            onMicClick={openVoiceMode}
+            onSend={handleSendText}
+          />
         </main>
+
+        {voiceOpen && (
+          <OrbOverlay
+            audioState={audioState}
+            isMinimized={voiceMinimized}
+            onClose={closeVoiceMode}
+            onExpand={() => setVoiceMinimized(false)}
+            onMinimize={() => setVoiceMinimized(true)}
+          />
+        )}
       </div>
     </LiveKitRoom>
   );
