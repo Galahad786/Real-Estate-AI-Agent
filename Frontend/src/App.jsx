@@ -93,18 +93,6 @@ async function readErrorMessage(response) {
   }
 }
 
-function speakText(value) {
-  const text = (value || "").trim();
-  if (!text || !("speechSynthesis" in window)) return;
-
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "en-US";
-  utterance.rate = 1;
-  utterance.pitch = 1;
-  window.speechSynthesis.speak(utterance);
-}
-
 export default function App() {
   const [token, setToken] = useState(null);
   const [roomName, setRoomName] = useState("");
@@ -183,10 +171,7 @@ export default function App() {
 
     try {
       setIsSendingText(true);
-      const assistantText = await sendTextMessage(text);
-      if (voiceOpen) {
-        speakText(assistantText);
-      }
+      await sendTextMessage(text);
     } finally {
       setIsSendingText(false);
     }
@@ -285,8 +270,6 @@ export default function App() {
             onClose={closeVoiceMode}
             onExpand={() => setVoiceMinimized(false)}
             onMinimize={() => setVoiceMinimized(true)}
-            onSendText={handleSendText}
-            textIsSending={isSendingText}
           />
         )}
       </div>
