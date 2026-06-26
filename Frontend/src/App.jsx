@@ -131,7 +131,7 @@ export default function App() {
       await connectToRoom();
     } catch (err) {
       console.error(err);
-      alert("Failed to connect");
+      alert(err?.message || "Failed to connect");
     }
   }
 
@@ -144,7 +144,7 @@ export default function App() {
         await connectToRoom(nextRoomName);
       } catch (err) {
         console.error(err);
-        alert("Failed to load conversation");
+        alert(err?.message || "Failed to load conversation");
       }
     }
   }
