@@ -35,6 +35,8 @@ export default function OrbOverlay({
   onClose,
   onExpand,
   onMinimize,
+  onSendText,
+  textIsSending,
 }) {
   if (isMinimized) {
     return (
@@ -63,6 +65,8 @@ export default function OrbOverlay({
           audioState={audioState}
           onClose={onClose}
           onMinimize={onMinimize}
+          onSendText={onSendText}
+          textIsSending={textIsSending}
         />
       </motion.div>
     </AnimatePresence>

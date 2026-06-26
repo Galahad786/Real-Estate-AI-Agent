@@ -242,12 +242,16 @@ export function useConversation({
         );
       }
       void loadConversations();
+      return assistantText;
     } catch (err) {
       console.error(err);
+      const errorText =
+        "Text chat endpoint is unavailable. Voice mode is still connected.";
       updateDraftMessage(
         assistantId,
-        "Text chat endpoint is unavailable. Voice mode is still connected.",
+        errorText,
       );
+      return "";
     }
   }, [
     addDraftMessage,

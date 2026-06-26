@@ -687,6 +687,57 @@ button {
   letter-spacing: 0.12em;
 }
 
+.voice-text-composer {
+  width: min(560px, calc(100vw - 48px));
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 28px;
+  padding: 8px 8px 8px 18px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(18, 18, 18, 0.78);
+}
+
+.voice-text-input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  line-height: 22px;
+}
+
+.voice-text-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.voice-text-send {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-light);
+  border-radius: 50%;
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  font-size: 18px;
+  transition: transform 150ms ease, opacity 150ms ease;
+}
+
+.voice-text-send:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.voice-text-send:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 .voice-controls,
 .transcript-header {
   position: fixed;
