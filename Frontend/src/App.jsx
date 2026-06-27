@@ -71,9 +71,12 @@ function mergeVisibleMessages(baseMessages, liveMessages) {
   );
 }
 
+const DEPLOYED_API_URL = "https://athletic-learning-production.up.railway.app";
+const configuredApiUrl = import.meta.env.VITE_API_URL || "";
 const API_URL =
-  import.meta.env.VITE_API_URL ||
-  (import.meta.env.DEV ? "" : "https://athletic-learning-production.up.railway.app");
+  configuredApiUrl.includes("your-backend-domain.com")
+    ? DEPLOYED_API_URL
+    : configuredApiUrl || (import.meta.env.DEV ? "" : DEPLOYED_API_URL);
 const LIVEKIT_URL = "wss://test-1-euow2v8o.livekit.cloud";
 
 async function readErrorMessage(response) {
