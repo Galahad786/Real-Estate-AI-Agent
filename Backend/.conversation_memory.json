@@ -1,0 +1,24 @@
+{
+  "sessions": {
+    "room-1783510692057": {
+      "title": "Can you tell me about t seven?",
+      "transcript_log": "User: Can you tell me about t seven?\nAgent: T Seven refers to Sector I-7, a well-established residential sector in Islamabad. It is located near the Islamabad\nUser: I meant e seven.\nAgent: Understood. You are asking about E-7, which is one of the most prestigious sectors in Islamabad.\n\nCategory: Ultra-Premium Residential\n\nE-7 is known for its large plots, wide tree-lined streets, and a very low population density. It is home to many diplomats, senior government officials, and business executives.\n\nKey features include:\n- Location: Directly adjacent to the Diplomatic Enclave and near the F-6 Super Market.\n- Housing: Primarily comprises large, custom-built bungalows and a limited number of high-end farmhouses.\n- Lifestyle: Very quiet, secure, and green. It has its own E-7 Markaz which offers basic shops, banks, and restaurants, though most residents rely on the nearby F-6 and F-7 markets for more options.\n- Access: Excellent connectivity to the city's main arteries.\n\nAre you considering buying a property in E-7, or are you looking for a rental?",
+      "created_at": "2026-07-08T11:39:19.269629"
+    },
+    "room-1783583071707": {
+      "title": "Can you hear me?",
+      "transcript_log": "User: Can you hear me?\nAgent: Yes, I can hear you. How can I help you with real estate in Islamabad?\nUser: Can you hear\nAgent: Yes, I can hear you clearly. Go ahead and tell me how I can assist you with real estate in Islamabad.",
+      "created_at": "2026-07-09T07:45:05.181240"
+    },
+    "room-1783583172799": {
+      "title": "Can you hear me?",
+      "transcript_log": "User: Can you hear me?\nAgent: Yes, I can hear you. How can I help you with real estate in Islamabad today?",
+      "created_at": "2026-07-09T07:47:34.127877"
+    },
+    "room-1783583456425": {
+      "title": "What type of properties can I get in this budget?",
+      "transcript_log": "User: What type of properties can I get in this budget?\nAgent: To give you useful advice, I need a bit more information.\n\nFirst, what is your budget number and currency? Also, are you looking to buy or rent, and in which sector or area of Islamabad?",
+      "created_at": "2026-07-09T07:51:47.039674"
+    }
+  }
+}

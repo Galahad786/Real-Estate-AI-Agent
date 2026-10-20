@@ -4,6 +4,7 @@ import threading
 from typing import Any
 
 from dotenv import load_dotenv
+from livekit.agents.voice import room_io
 from livekit.agents import (
     Agent,
     AgentServer,
@@ -13,7 +14,7 @@ from livekit.agents import (
     JobContext,
     cli,
 )
-from livekit.plugins import deepgram, openai, silero
+from livekit.plugins import deepgram, dtln, openai, silero
 from supabase import Client, create_client
 
 from conversation_store import append_file_transcript, get_file_transcript
@@ -96,7 +97,7 @@ def get_supabase() -> Client:
 def message_text(item: Any) -> str:
     content = getattr(item, "content", "")
     if isinstance(content, str):
-        return content.striip()
+        return content.strip()
     if isinstance(content, list):
         return " ".join(str(part) for part in content if part).strip()
     return str(content).strip()
@@ -360,6 +361,34 @@ def build_agent(room_id: str) -> Agent:
     return RealEstateAgent(room_id)
 
 
+def get_noise_mode(value: str | None = None) -> str:
+    mode = (value or os.getenv("NOISE_MODE", "off")).strip().lower()
+    return mode if mode in {"off", "dtln"} else "off"
+
+
+def get_noise_strength() -> float:
+    try:
+        return float(os.getenv("DTLN_STRENGTH", "0.5"))
+    except ValueError:
+        return 0.5
+
+
+def build_room_input_options(noise_mode: str | None = None) -> room_io.RoomInputOptions | None:
+    mode = get_noise_mode(noise_mode)
+
+    if mode != "dtln":
+        print("[NoiseCancellation] Disabled / baseline mode")
+        return None
+
+    strength = get_noise_strength()
+    print(f"[NoiseCancellation] DTLN enabled with strength={strength}")
+
+    # Apply noise suppression before STT/VAD so the downstream pipeline sees cleaner audio.
+    return room_io.RoomInputOptions(
+        noise_cancellation=dtln.noise_suppression(strength=strength)
+    )
+
+
 @server.rtc_session()
 async def entrypoint(ctx: JobContext) -> None:
     validate_environment()
@@ -381,6 +410,8 @@ async def entrypoint(ctx: JobContext) -> None:
         tts=deepgram.TTS(model=os.getenv("DEEPGRAM_TTS_MODEL", "aura-2-andromeda-en")),
     )
 
+    room_input_options = build_room_input_options()
+
     @session.on("conversation_item_added")
     def on_conversation_item(event: ConversationItemAddedEvent) -> None:    
         try:
@@ -401,6 +432,7 @@ async def entrypoint(ctx: JobContext) -> None:
         agent=build_agent(room_id),
         room=ctx.room,
         record=False,
+        room_input_options=room_input_options,
     )
 
 

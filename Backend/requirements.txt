@@ -2,6 +2,7 @@ livekit-agents>=1.4.1
 livekit-plugins-openai>=1.4.0
 livekit-plugins-silero>=1.4.0
 livekit-plugins-deepgram>=1.4.0
+livekit-plugins-dtln==0.1.5
 supabase>=2.4.0
 python-dotenv>=1.0.0
 PyJWT>=2.8.0
