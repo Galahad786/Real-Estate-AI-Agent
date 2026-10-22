@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
-export default function InputBar({ isRecording, isSending, onMicClick, onSend }) {
+export default function InputBar({
+  isRecording,
+  isSending,
+  onMicClick,
+  onSend,
+  onStop,
+}) {
   const [value, setValue] = useState("");
   const textareaRef = useRef(null);
 
@@ -23,6 +29,14 @@ export default function InputBar({ isRecording, isSending, onMicClick, onSend })
   return (
     <footer className="input-footer">
       <div className="composer">
+        <button
+          className={`circle-button mic-button${isRecording ? " is-recording" : ""}`}
+          type="button"
+          aria-label="Start voice mode"
+          onClick={onMicClick}
+        >
+          🎙
+        </button>
         <textarea
           ref={textareaRef}
           className="chat-input"
@@ -33,28 +47,32 @@ export default function InputBar({ isRecording, isSending, onMicClick, onSend })
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
+              if (isSending) return;
               submit();
             }
           }}
         />
         <div className="composer-actions">
-          <button
-            className={`circle-button mic-button${isRecording ? " is-recording" : ""}`}
-            type="button"
-            aria-label="Start voice mode"
-            onClick={onMicClick}
-          >
-            🎙
-          </button>
-          <button
-            className="circle-button send-button"
-            type="button"
-            aria-label="Send message"
-            disabled={!value.trim() || isSending}
-            onClick={submit}
-          >
-            ↑
-          </button>
+          {isSending ? (
+            <button
+              className="circle-button stop-button"
+              type="button"
+              aria-label="Stop response"
+              onClick={onStop}
+            >
+              <span className="stop-icon" aria-hidden="true" />
+            </button>
+          ) : (
+            <button
+              className="circle-button send-button"
+              type="button"
+              aria-label="Send message"
+              disabled={!value.trim()}
+              onClick={submit}
+            >
+              ↑
+            </button>
+          )}
         </div>
       </div>
       <p className="disclaimer">AI responses are for informational purposes only.</p>

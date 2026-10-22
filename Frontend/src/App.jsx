@@ -22,10 +22,10 @@ function cleanVisibleMessages(items) {
 
   for (const item of items) {
     const text = normalizeMessageText(item.text || item.content);
-    if (!text) continue;
+    if (!text && !(item.role === "assistant" && item.streaming)) continue;
 
     const previous = cleaned.at(-1);
-    if (previous) {
+    if (previous && text) {
       const previousText = normalizeMessageText(previous.text || previous.content);
       if (previous.role === item.role && previousText === text) continue;
 
@@ -114,6 +114,7 @@ export default function App() {
     loadConversations,
     loadHistory,
     sendTextMessage,
+    stopTextMessage,
   } = useConversation({
     apiUrl: API_URL,
     roomName,
@@ -261,6 +262,7 @@ export default function App() {
             isSending={isSendingText}
             onMicClick={openVoiceMode}
             onSend={handleSendText}
+            onStop={stopTextMessage}
           />
         </main>
 

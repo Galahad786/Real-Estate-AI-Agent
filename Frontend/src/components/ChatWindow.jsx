@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 
 import MessageBubble from "./MessageBubble";
 import SuggestionChips from "./SuggestionChips";
@@ -7,6 +6,12 @@ import SuggestionChips from "./SuggestionChips";
 function messageKey(message, index) {
   if (message.id) return message.id;
   return `${message.role}-${index}`;
+}
+
+function isNearBottom(element, threshold = 120) {
+  return (
+    element.scrollHeight - element.scrollTop - element.clientHeight < threshold
+  );
 }
 
 export default function ChatWindow({
@@ -18,26 +23,28 @@ export default function ChatWindow({
   const endRef = useRef(null);
   const windowRef = useRef(null);
   const shouldFollowRef = useRef(true);
+  const wasStreamingRef = useRef(false);
 
   function handleScroll() {
     const element = windowRef.current;
-    if (!element) return;
+    if (!element || isStreaming) return;
 
-    const distanceFromBottom =
-      element.scrollHeight - element.scrollTop - element.clientHeight;
-    shouldFollowRef.current = distanceFromBottom < 120;
+    shouldFollowRef.current = isNearBottom(element);
   }
 
   useEffect(() => {
-    const element = windowRef.current;
-    if (!element || !shouldFollowRef.current) return undefined;
+    const startedStreaming = isStreaming && !wasStreamingRef.current;
+    wasStreamingRef.current = isStreaming;
+
+    // Sending always scrolls to the latest exchange, even if scrolled up.
+    if (startedStreaming) {
+      shouldFollowRef.current = true;
+    }
+
+    if (!windowRef.current) return undefined;
+    if (!isStreaming && !shouldFollowRef.current) return undefined;
 
     const frame = window.requestAnimationFrame(() => {
-      if (isStreaming) {
-        element.scrollTop = element.scrollHeight;
-        return;
-      }
-
       endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     });
 
@@ -57,17 +64,15 @@ export default function ChatWindow({
           <SuggestionChips onSuggestionClick={onSuggestionClick} />
         </div>
       ) : (
-        <motion.div className="message-list">
-          <AnimatePresence initial={false}>
-            {messages.map((message, index) => (
-              <MessageBubble
-                key={messageKey(message, index)}
-                message={message}
-              />
-            ))}
-          </AnimatePresence>
+        <div className="message-list">
+          {messages.map((message, index) => (
+            <MessageBubble
+              key={messageKey(message, index)}
+              message={message}
+            />
+          ))}
           <div ref={endRef} />
-        </motion.div>
+        </div>
       )}
     </section>
   );

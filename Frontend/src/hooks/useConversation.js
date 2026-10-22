@@ -29,14 +29,20 @@ function cleanMessageList(items) {
 
   for (const item of items) {
     const text = normalizeMessageText(item.text || item.content);
-    if (!text) continue;
+    if (!text && item.role !== "assistant") continue;
+    // Keep in-progress assistant placeholders (empty text while streaming).
+    if (!text && item.role === "assistant" && !item.streaming) continue;
 
     const previous = cleaned.at(-1);
-    if (previous) {
+    if (previous && text) {
       const previousText = normalizeMessageText(previous.text || previous.content);
       if (previous.role === item.role && previousText === text) continue;
 
-      if (previous.role !== item.role && previousText === text && text.length > 30) {
+      if (
+        previous.role !== item.role &&
+        previousText === text &&
+        text.length > 30
+      ) {
         if (item.role === "assistant") {
           cleaned[cleaned.length - 1] = item;
         }
@@ -85,6 +91,8 @@ export function useConversation({
   const [draftMessages, setDraftMessages] = useState([]);
   const draftId = useRef(0);
   const messagesRoomRef = useRef("");
+  const sendingRef = useRef(false);
+  const abortControllerRef = useRef(null);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -98,8 +106,8 @@ export function useConversation({
     }
   }, [apiUrl]);
 
-  const loadHistory = useCallback(async ({ preserve = [] } = {}) => {
-    if (!roomName) return [];
+  const loadHistory = useCallback(async () => {
+    if (!roomName || sendingRef.current) return [];
 
     try {
       const response = await fetch(`${apiUrl}/api/history/${roomName}`);
@@ -120,10 +128,16 @@ export function useConversation({
       );
 
       setMessages((previous) => {
+        // Never replace newer local messages with a stale/shorter server snapshot.
+        if (
+          messagesRoomRef.current === roomName &&
+          previous.length > nextMessages.length
+        ) {
+          return previous;
+        }
+
         const baseline =
-          messagesRoomRef.current === roomName
-            ? [...previous, ...preserve]
-            : [...preserve];
+          messagesRoomRef.current === roomName ? previous : [];
         messagesRoomRef.current = roomName;
         return reconcileMessages(baseline, nextMessages, roomName);
       });
@@ -148,21 +162,6 @@ export function useConversation({
     return `draft-${draftId.current}`;
   }, [roomName]);
 
-  const updateDraftMessage = useCallback((id, text) => {
-    const polishedText = polishAssistantText(text);
-
-    setDraftMessages((current) =>
-      current.map((message) =>
-        message.id === id
-          ? {
-              ...message,
-              text: message.role === "assistant" ? polishedText : text,
-            }
-          : message,
-      ),
-    );
-  }, []);
-
   const currentMessages = useMemo(
     () => (messagesRoomName === roomName ? messages : []),
     [messages, messagesRoomName, roomName],
@@ -172,7 +171,9 @@ export function useConversation({
     () =>
       draftMessages.filter((message) => {
         if (message.room_name !== roomName) return false;
-        if (!normalizeMessageText(message.text || message.content)) return true;
+        if (!normalizeMessageText(message.text || message.content)) {
+          return Boolean(message.streaming);
+        }
         return !currentMessages.some((savedMessage) =>
           samePersistedMessage(savedMessage, message),
         );
@@ -180,29 +181,62 @@ export function useConversation({
     [currentMessages, draftMessages, roomName],
   );
 
+  const stopTextMessage = useCallback(() => {
+    abortControllerRef.current?.abort();
+  }, []);
+
   const sendTextMessage = useCallback(async (text) => {
     if (!roomName) return;
 
-    const userId = addDraftMessage({
-      role: "user",
-      text,
-      source: "text",
-    });
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
-    const assistantId = addDraftMessage({
-      role: "assistant",
-      text: "",
-      source: "text",
-    });
+    sendingRef.current = true;
+    draftId.current += 1;
+    const userId = `local-${draftId.current}`;
+    draftId.current += 1;
+    const assistantId = `local-${draftId.current}`;
+
+    // One list only — user + streaming assistant — so keys never swap.
+    setMessages((previous) =>
+      cleanMessageList([
+        ...previous,
+        { id: userId, role: "user", text, source: "text" },
+        {
+          id: assistantId,
+          role: "assistant",
+          text: "",
+          source: "text",
+          streaming: true,
+        },
+      ]),
+    );
+    messagesRoomRef.current = roomName;
+    setMessagesRoomName(roomName);
+
     let assistantText = "";
 
-    const history = [...currentMessages, ...visibleDraftMessages]
-      .filter((message) => message.id !== userId && message.id !== assistantId)
-      .slice(-10)
-      .map((message) => ({
-        role: message.role,
-        text: message.text || message.content || "",
-      }));
+    const history = currentMessages.slice(-10).map((message) => ({
+      role: message.role,
+      text: message.text || message.content || "",
+    }));
+    history.push({ role: "user", text });
+
+    const patchAssistant = (nextText, streaming = true) => {
+      assistantText = nextText;
+      setMessages((previous) =>
+        previous.map((message) =>
+          message.id === assistantId
+            ? {
+                ...message,
+                text: nextText,
+                streaming,
+              }
+            : message,
+        ),
+      );
+    };
 
     try {
       const response = await fetch(`${apiUrl}/api/chat`, {
@@ -213,6 +247,7 @@ export function useConversation({
           message: text,
           history,
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -223,81 +258,80 @@ export function useConversation({
 
       if (!response.body || contentType.includes("application/json")) {
         const data = await response.json();
-        assistantText = polishAssistantText(
-          data.text || data.message || data.response || data.content || "",
+        patchAssistant(
+          polishAssistantText(
+            data.text || data.message || data.response || data.content || "",
+          ),
+          false,
         );
-        updateDraftMessage(assistantId, assistantText);
       } else {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let flushTimer = null;
+        let flushFrame = null;
         let rawAssistantText = "";
 
-        const flushAssistantText = () => {
-          flushTimer = null;
-          assistantText = polishAssistantText(rawAssistantText);
-          updateDraftMessage(assistantId, assistantText);
+        const flushAssistantText = (streaming = true) => {
+          flushFrame = null;
+          patchAssistant(polishAssistantText(rawAssistantText), streaming);
         };
 
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
 
-          rawAssistantText += decoder.decode(value, { stream: true });
-          if (flushTimer === null) {
-            flushTimer = window.setTimeout(flushAssistantText, 80);
+            rawAssistantText += decoder.decode(value, { stream: true });
+            if (flushFrame === null) {
+              flushFrame = window.requestAnimationFrame(() =>
+                flushAssistantText(true),
+              );
+            }
+          }
+        } catch (streamError) {
+          if (streamError?.name !== "AbortError") {
+            throw streamError;
           }
         }
 
         rawAssistantText += decoder.decode();
-        if (flushTimer !== null) {
-          window.clearTimeout(flushTimer);
+        if (flushFrame !== null) {
+          window.cancelAnimationFrame(flushFrame);
         }
-        assistantText = polishAssistantText(rawAssistantText);
-        updateDraftMessage(assistantId, assistantText);
+        flushAssistantText(false);
+
+        if (controller.signal.aborted && !rawAssistantText.trim()) {
+          patchAssistant("Response stopped.", false);
+        }
       }
 
-      // Promote drafts into messages with the same ids first so React does not
-      // remount bubbles when history catches up (that remount caused the flicker).
-      const committed = [
-        { id: userId, role: "user", text, source: "text" },
-        {
-          id: assistantId,
-          role: "assistant",
-          text: assistantText,
-          source: "text",
-        },
-      ];
-
-      setMessages((previous) => cleanMessageList([...previous, ...committed]));
-      setDraftMessages((current) =>
-        current.filter(
-          (message) => message.id !== userId && message.id !== assistantId,
-        ),
-      );
-
-      await loadHistory({ preserve: committed });
       void loadConversations();
       return assistantText;
     } catch (err) {
+      if (err?.name === "AbortError") {
+        patchAssistant(
+          assistantText.trim() ? assistantText : "Response stopped.",
+          false,
+        );
+        return assistantText;
+      }
+
       console.error(err);
-      const errorText =
-        "Text chat endpoint is unavailable. Voice mode is still connected.";
-      updateDraftMessage(
-        assistantId,
-        errorText,
+      patchAssistant(
+        "Text chat endpoint is unavailable. Voice mode is still connected.",
+        false,
       );
       return "";
+    } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
+      sendingRef.current = false;
     }
   }, [
-    addDraftMessage,
     apiUrl,
     loadConversations,
-    loadHistory,
     currentMessages,
     roomName,
-    updateDraftMessage,
-    visibleDraftMessages,
   ]);
 
   useEffect(() => {
@@ -326,5 +360,6 @@ export function useConversation({
     loadHistory,
     addDraftMessage,
     sendTextMessage,
+    stopTextMessage,
   };
 }

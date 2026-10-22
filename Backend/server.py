@@ -1,5 +1,7 @@
 import os
 import re
+import threading
+import time
 from datetime import datetime
 from datetime import timedelta
 
@@ -23,6 +25,8 @@ load_dotenv()
 
 ROOM_RE = re.compile(r"^[A-Za-z0-9_-]{3,80}$")
 IDENTITY_RE = re.compile(r"^[A-Za-z0-9_.@-]{3,80}$")
+PROPERTY_CONTEXT_TTL_SECONDS = 300
+_property_context_cache: dict[str, float | str] = {"value": "", "expires_at": 0.0}
 
 
 class TokenRequest(BaseModel):
@@ -226,12 +230,20 @@ def merge_memory_history(room_name: str, messages: list[Message]) -> list[Messag
 
 
 def load_property_context() -> str:
+    now = time.time()
+    cached = str(_property_context_cache.get("value") or "")
+    expires_at = float(_property_context_cache.get("expires_at") or 0.0)
+    if cached and expires_at > now:
+        return cached
+
     try:
-      client = supabase_client()
-      insights = client.table("property_insights").select("*").execute()
-      prices = client.table("property_prices").select("*").execute()
+        client = supabase_client()
+        insights = client.table("property_insights").select("*").execute()
+        prices = client.table("property_prices").select("*").execute()
     except Exception:
-      return ""
+        _property_context_cache["value"] = cached
+        _property_context_cache["expires_at"] = now + 30
+        return cached
 
     lines = ["PROPERTY INSIGHTS:"]
     for row in insights.data or []:
@@ -254,7 +266,10 @@ def load_property_context() -> str:
             )
         )
 
-    return "\n".join(lines)
+    value = "\n".join(lines)
+    _property_context_cache["value"] = value
+    _property_context_cache["expires_at"] = now + PROPERTY_CONTEXT_TTL_SECONDS
+    return value
 
 
 def load_room_messages(room_name: str) -> list[Message]:
@@ -296,8 +311,9 @@ def deepseek_messages(room_name: str, message: str, history: list[Message]) -> l
         system = f"{system}\n\nUse this verified property context when relevant:\n{context}"
 
     messages = [{"role": "system", "content": system}]
-    room_history = load_room_messages(room_name)
-    usable_history = room_history[-10:] if room_history else history[-10:]
+    # Prefer the history the client already has so we do not block on Supabase
+    # before the first streamed token.
+    usable_history = history[-10:] if history else load_room_messages(room_name)[-10:]
 
     for item in usable_history:
         role = "assistant" if item.role == "assistant" else "user"
@@ -308,6 +324,14 @@ def deepseek_messages(room_name: str, message: str, history: list[Message]) -> l
         messages.append({"role": "user", "content": message})
 
     return messages
+
+
+def append_transcript_async(room_name: str, role: str, text: str) -> None:
+    threading.Thread(
+        target=append_transcript,
+        args=(room_name, role, text),
+        daemon=True,
+    ).start()
 
 
 app = FastAPI(title="Real Estate AI Backend")
@@ -399,18 +423,19 @@ def chat(request: ChatRequest):
     if not message:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
-    append_transcript(room_name, "User", message)
-
-    payload = {
-        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
-        "messages": deepseek_messages(room_name, message, request.history),
-        "stream": True,
-        "temperature": 0.4,
-    }
+    # Persist in the background so Supabase/file I/O does not delay first token.
+    append_transcript_async(room_name, "User", message)
 
     def stream_response():
         assistant_text = ""
         try:
+            payload = {
+                "model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+                "messages": deepseek_messages(room_name, message, request.history),
+                "stream": True,
+                "temperature": 0.4,
+            }
+
             with requests.post(
                 "https://api.deepseek.com/chat/completions",
                 headers={
@@ -448,7 +473,7 @@ def chat(request: ChatRequest):
                         yield delta
 
             if assistant_text.strip():
-                append_transcript(room_name, "Agent", assistant_text)
+                append_transcript_async(room_name, "Agent", assistant_text)
 
         except Exception:
             yield (
