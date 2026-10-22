@@ -132,7 +132,3 @@ To run a piece alone: `npm run dev:backend`, `npm run dev:frontend`, or `npm run
 - Do not commit `.env`, `.env.local`, or service role keys.
 - The agent is tuned for **Islamabad** real estate and avoids inventing live listings or legal/financial guarantees.
 - Voice needs the agent worker running and connected to the same LiveKit project as your API keys.
-
-## License
-
-Add a license before publishing if you want to define reuse terms.
