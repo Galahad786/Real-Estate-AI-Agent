@@ -116,8 +116,6 @@ export default function App() {
     sendTextMessage,
   } = useConversation({
     apiUrl: API_URL,
-    historyPaused: voiceOpen,
-    historyRefreshMs: 2000,
     roomName,
   });
 

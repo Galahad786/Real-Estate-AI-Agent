@@ -1,0 +1,14 @@
+{
+  "name": "real-estate-ai-agent",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "concurrently -k -n backend,frontend,agent -c blue,green,magenta \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:agent\"",
+    "dev:backend": "cd Backend && .venv\\Scripts\\python.exe -m uvicorn server:app --reload --host 127.0.0.1 --port 8000",
+    "dev:frontend": "npm --prefix Frontend run dev",
+    "dev:agent": "cd Backend && .venv\\Scripts\\python.exe agent.py dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

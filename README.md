@@ -106,30 +106,16 @@ Create these in your Supabase project to match how your data is stored. Chat sti
 
 ## Running locally
 
-You need **three** processes:
-
-**API server**
+From the **repo root** (after `npm install` once in the root and in `Frontend/`):
 
 ```bash
-cd Backend
-uvicorn server:app --reload --host 0.0.0.0 --port 8000
-```
-
-**LiveKit agent worker** (voice)
-
-```bash
-cd Backend
-python agent.py dev
-```
-
-**Frontend**
-
-```bash
-cd Frontend
+npm install
 npm run dev
 ```
 
-Open the URL Vite prints (typically `http://localhost:5173`).
+That starts everything: FastAPI backend, Vite frontend, and the LiveKit voice agent. Open `http://localhost:5173`.
+
+To run a piece alone: `npm run dev:backend`, `npm run dev:frontend`, or `npm run dev:agent`.
 
 ## API overview
 

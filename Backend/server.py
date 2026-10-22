@@ -156,6 +156,7 @@ def append_transcript(room_name: str, role: str, text: str) -> None:
         )
         return
     except Exception:
+        # Single fallback write via the file store, then mirror into memory.
         append_file_transcript(room_name, role, text)
         session = memory_sessions.setdefault(
             room_name,
@@ -165,9 +166,10 @@ def append_transcript(room_name: str, role: str, text: str) -> None:
                 "created_at": datetime.utcnow().isoformat(),
             },
         )
-        current_log = session.get("transcript_log") or ""
-        session["transcript_log"] = f"{current_log}\n{line}" if current_log else line
-        if role == "User" and session.get("title") == room_name:
+        session["transcript_log"] = get_file_transcript(room_name)
+        if role == "User" and (
+            not session.get("title") or session.get("title") == room_name
+        ):
             session["title"] = text.strip()[:60]
 
 
@@ -194,11 +196,17 @@ def memory_conversations() -> list[dict[str, str]]:
 
 
 def memory_history(room_name: str) -> list[Message]:
+    # Prefer a single source. append_transcript's fallback writes the same
+    # lines to both memory_sessions and the file — concatenating them
+    # duplicated every exchange in the UI.
     session = memory_sessions.get(room_name)
-    transcript = session.get("transcript_log") if session else ""
-    file_transcript = get_file_transcript(room_name)
-    combined = "\n".join(item for item in [transcript, file_transcript] if item)
-    return dedupe_messages(parse_transcript(combined))
+    transcript = (session.get("transcript_log") if session else "") or ""
+    source = transcript.strip() or get_file_transcript(room_name)
+    return dedupe_messages(parse_transcript(source))
+
+
+def _message_key(message: Message) -> tuple[str, str]:
+    return (message.role, " ".join(message.text.split()))
 
 
 def merge_memory_history(room_name: str, messages: list[Message]) -> list[Message]:
@@ -207,7 +215,14 @@ def merge_memory_history(room_name: str, messages: list[Message]) -> list[Messag
         return dedupe_messages(messages)
     if not messages:
         return memory_messages
-    return dedupe_messages([*messages, *memory_messages])
+
+    existing = {_message_key(message) for message in messages}
+    extras = [
+        message
+        for message in memory_messages
+        if _message_key(message) not in existing
+    ]
+    return dedupe_messages([*messages, *extras])
 
 
 def load_property_context() -> str:

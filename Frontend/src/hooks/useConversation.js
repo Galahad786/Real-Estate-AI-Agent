@@ -52,8 +52,6 @@ function cleanMessageList(items) {
 
 export function useConversation({
   apiUrl,
-  historyPaused = false,
-  historyRefreshMs = 2000,
   roomName,
 }) {
   const [messages, setMessages] = useState([]);
@@ -270,15 +268,11 @@ export function useConversation({
   }, [loadConversations]);
 
   useEffect(() => {
-    if (!roomName || historyPaused) return undefined;
+    if (!roomName) return undefined;
 
     const timeout = window.setTimeout(loadHistory, 0);
-    const interval = window.setInterval(loadHistory, historyRefreshMs);
-    return () => {
-      window.clearTimeout(timeout);
-      window.clearInterval(interval);
-    };
-  }, [historyPaused, historyRefreshMs, loadHistory, roomName]);
+    return () => window.clearTimeout(timeout);
+  }, [loadHistory, roomName]);
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.room_name === roomName),
