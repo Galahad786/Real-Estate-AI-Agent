@@ -35,7 +35,22 @@ export default function InputBar({
           aria-label="Start voice mode"
           onClick={onMicClick}
         >
-          🎙
+          <svg
+            className="mic-icon"
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-5a3.5 3.5 0 1 0-7 0v5A3.5 3.5 0 0 0 12 15Z" />
+            <path d="M18 11.5v.5a6 6 0 0 1-12 0v-.5" />
+            <path d="M12 18.5v2" />
+          </svg>
         </button>
         <textarea
           ref={textareaRef}

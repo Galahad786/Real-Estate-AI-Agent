@@ -579,12 +579,23 @@ button {
 
 .mic-button {
   background: var(--bg-card);
+  color: var(--text-secondary);
+}
+
+.mic-button:hover {
   color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 .mic-button.is-recording {
+  color: var(--text-primary);
   border-color: var(--accent);
   box-shadow: 0 0 18px rgba(255, 255, 255, 0.22);
+}
+
+.mic-icon {
+  display: block;
+  flex-shrink: 0;
 }
 
 .send-button {
