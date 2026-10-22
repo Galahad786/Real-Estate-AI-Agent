@@ -190,6 +190,19 @@ export default function App() {
   const title = activeConversation?.title || "New Islamabad property conversation";
 
   async function openVoiceMode() {
+    // Unlock browser audio so the orb can play the agent's spoken replies.
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        const context = new AudioCtx();
+        if (context.state === "suspended") {
+          await context.resume();
+        }
+      }
+    } catch (error) {
+      console.warn("Could not unlock audio context", error);
+    }
+
     if (!token || tokenRoomName !== roomName) {
       await connectToRoom(roomName);
     }
@@ -230,7 +243,7 @@ export default function App() {
       audio={true}
       video={false}
     >
-      <RoomAudioRenderer />
+      <RoomAudioRenderer volume={1} />
       <LiveTranscriptionBridge
         enabled={voiceOpen}
         onMessages={setLiveVoiceMessages}
@@ -258,9 +271,9 @@ export default function App() {
             onSuggestionClick={handleSendText}
           />
           <InputBar
-            isRecording={voiceOpen}
+            isVoiceOpen={voiceOpen}
             isSending={isSendingText}
-            onMicClick={openVoiceMode}
+            onVoiceClick={openVoiceMode}
             onSend={handleSendText}
             onStop={stopTextMessage}
           />

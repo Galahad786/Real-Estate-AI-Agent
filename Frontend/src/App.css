@@ -577,25 +577,41 @@ button {
   transform: scale(1.05);
 }
 
-.mic-button {
+.composer-icon {
+  display: block;
+  flex-shrink: 0;
+}
+
+.mic-button,
+.voice-mode-button {
   background: var(--bg-card);
   color: var(--text-secondary);
 }
 
-.mic-button:hover {
+.mic-button:hover,
+.voice-mode-button:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
 }
 
-.mic-button.is-recording {
-  color: var(--text-primary);
-  border-color: var(--accent);
-  box-shadow: 0 0 18px rgba(255, 255, 255, 0.22);
+.mic-button:disabled,
+.voice-mode-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+  transform: none;
 }
 
-.mic-icon {
-  display: block;
-  flex-shrink: 0;
+.mic-button.is-listening {
+  color: var(--bg-primary);
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.18);
+}
+
+.voice-mode-button.is-active {
+  color: var(--text-primary);
+  border-color: var(--accent);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.18);
 }
 
 .send-button {

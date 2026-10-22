@@ -69,7 +69,7 @@ server = AgentServer()
 
 
 def require_env(name: str) -> str:
-    value = os.getenv(name)
+    value = (os.getenv(name) or "").strip()
     if not value:
         raise RuntimeError(f"Missing required environment variable: {name}")
     return value
@@ -403,17 +403,24 @@ async def entrypoint(ctx: JobContext) -> None:
 
     session = AgentSession(
         vad=silero.VAD.load(),
-        stt=deepgram.STT(model=os.getenv("DEEPGRAM_STT_MODEL", "nova-3")),
+        stt=deepgram.STT(
+            model=os.getenv("DEEPGRAM_STT_MODEL", "nova-3"),
+            api_key=require_env("DEEPGRAM_API_KEY"),
+        ),
         llm=openai.LLM.with_deepseek(
             model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+            api_key=require_env("DEEPSEEK_API_KEY"),
         ),
-        tts=deepgram.TTS(model=os.getenv("DEEPGRAM_TTS_MODEL", "aura-2-andromeda-en")),
+        tts=deepgram.TTS(
+            model=os.getenv("DEEPGRAM_TTS_MODEL", "aura-2-andromeda-en"),
+            api_key=require_env("DEEPGRAM_API_KEY"),
+        ),
     )
 
     room_input_options = build_room_input_options()
 
     @session.on("conversation_item_added")
-    def on_conversation_item(event: ConversationItemAddedEvent) -> None:    
+    def on_conversation_item(event: ConversationItemAddedEvent) -> None:
         try:
             item = event.item
             role = getattr(item, "role", None)
@@ -426,13 +433,27 @@ async def entrypoint(ctx: JobContext) -> None:
                 save_to_db(room_id, "Agent", text)
 
         except Exception:
-         logger.exception("Conversation handler failed")
+            logger.exception("Conversation handler failed")
+
+    @session.on("error")
+    def on_session_error(event: Any) -> None:
+        logger.error("Agent session error: %s", event)
 
     await session.start(
         agent=build_agent(room_id),
         room=ctx.room,
         record=False,
         room_input_options=room_input_options,
+        room_output_options=room_io.RoomOutputOptions(
+            audio_enabled=True,
+            transcription_enabled=True,
+        ),
+    )
+
+    # Speak immediately so the user can confirm orb audio playback works.
+    await session.say(
+        "Hi, I am ready. Ask me about Islamabad real estate.",
+        allow_interruptions=True,
     )
 
 
