@@ -50,6 +50,31 @@ function cleanMessageList(items) {
   return cleaned;
 }
 
+/** Keep existing React keys when server history matches on-screen messages. */
+function reconcileMessages(previous, next, roomName) {
+  const used = new Set();
+
+  return next.map((message, index) => {
+    const matchIndex = previous.findIndex(
+      (candidate, candidateIndex) =>
+        !used.has(candidateIndex) && samePersistedMessage(candidate, message),
+    );
+
+    if (matchIndex >= 0) {
+      used.add(matchIndex);
+      return {
+        ...message,
+        id: previous[matchIndex].id,
+      };
+    }
+
+    return {
+      ...message,
+      id: message.id || `${roomName}-${index}`,
+    };
+  });
+}
+
 export function useConversation({
   apiUrl,
   roomName,
@@ -59,6 +84,7 @@ export function useConversation({
   const [conversations, setConversations] = useState([]);
   const [draftMessages, setDraftMessages] = useState([]);
   const draftId = useRef(0);
+  const messagesRoomRef = useRef("");
 
   const loadConversations = useCallback(async () => {
     try {
@@ -72,7 +98,7 @@ export function useConversation({
     }
   }, [apiUrl]);
 
-  const loadHistory = useCallback(async () => {
+  const loadHistory = useCallback(async ({ preserve = [] } = {}) => {
     if (!roomName) return [];
 
     try {
@@ -93,7 +119,14 @@ export function useConversation({
           : [],
       );
 
-      setMessages(nextMessages);
+      setMessages((previous) => {
+        const baseline =
+          messagesRoomRef.current === roomName
+            ? [...previous, ...preserve]
+            : [...preserve];
+        messagesRoomRef.current = roomName;
+        return reconcileMessages(baseline, nextMessages, roomName);
+      });
       setMessagesRoomName(roomName);
       return nextMessages;
     } catch (err) {
@@ -224,21 +257,26 @@ export function useConversation({
         updateDraftMessage(assistantId, assistantText);
       }
 
-      const savedMessages = await loadHistory();
-      const hasSavedUserMessage = savedMessages.some((message) =>
-        samePersistedMessage(message, { role: "user", text }),
-      );
-      const hasSavedAssistantMessage = savedMessages.some((message) =>
-        samePersistedMessage(message, { role: "assistant", text: assistantText }),
+      // Promote drafts into messages with the same ids first so React does not
+      // remount bubbles when history catches up (that remount caused the flicker).
+      const committed = [
+        { id: userId, role: "user", text, source: "text" },
+        {
+          id: assistantId,
+          role: "assistant",
+          text: assistantText,
+          source: "text",
+        },
+      ];
+
+      setMessages((previous) => cleanMessageList([...previous, ...committed]));
+      setDraftMessages((current) =>
+        current.filter(
+          (message) => message.id !== userId && message.id !== assistantId,
+        ),
       );
 
-      if (hasSavedUserMessage && hasSavedAssistantMessage) {
-        setDraftMessages((current) =>
-          current.filter(
-            (message) => message.id !== userId && message.id !== assistantId,
-          ),
-        );
-      }
+      await loadHistory({ preserve: committed });
       void loadConversations();
       return assistantText;
     } catch (err) {

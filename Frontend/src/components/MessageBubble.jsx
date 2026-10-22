@@ -15,10 +15,11 @@ export default function MessageBubble({ message }) {
   return (
     <motion.article
       className={`message-row${isUser ? " is-user" : " is-assistant"}`}
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.25, ease: "easeOut" }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.18, ease: "easeOut" }}
+      layout={false}
     >
       {!isUser && <div className="message-avatar">AI</div>}
       <div className="message-body">
